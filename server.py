@@ -19,15 +19,32 @@ class ServerProtocol(asyncio.Protocol):
         decoded = data.decode()
 
         if self.login is not None:
-            self.send_message(decoded)
-        else:
-            if decoded.startswith("login:"):
-                self.login = decoded.replace("login:", "").replace("\r\n", "")
-                self.transport.write(
-                    f"Привет, {self.login}!\n".encode()
-                )
-            else:
-                self.transport.write("Неправильный логин\n".encode())
+            # сообщение приходит уже с переводом строки, и в send_message еще перевод строки добавляется, фиксим
+            self.send_message(decoded.rstrip())
+
+        elif decoded.startswith("login:"):
+            # не во всех системах \r есть, кроме того могут на-вводить пробелов в начале и конце, делаем strip()
+            login = decoded.replace("login:", "").strip()
+
+            # 1. При попытке подключения клиента под логином, который уже есть в чате:
+            if self.is_login_exists(login):
+                # 1.1 отправляем клиенту текст с ошибкой "Логин {login} занят, попробуйте другой"
+                self.transport.write("Логин {login} занят, попробуйте другой\n".encode())
+                # 1.2 отключаем от сервера соединение клиента
+                self.transport.close()
+                return
+
+            # 2. При успешном подключении клиента в чат:
+            # ! логин может оказаться пустой строкой, проверяем это тоже
+            elif login:
+                self.login = login
+                self.transport.write(f"Привет, {self.login}!\n".encode())
+                #  2.1 Отправлять ему последние 10 сообщений из чата
+                self.send_history()
+                return
+
+            # и вообще приглашение login: по хорошему надо чтоб сервер слал, но в рамках ТЗ оставим как есть
+            self.transport.write("Неправильный логин\n".encode())
 
     def connection_made(self, transport: transports.Transport):
         self.server.clients.append(self)
@@ -40,13 +57,36 @@ class ServerProtocol(asyncio.Protocol):
 
     def send_message(self, content: str):
         message = f"{self.login}: {content}\n"
+        # сохраняем историю
+        self.add_history(message)
 
         for user in self.server.clients:
+            # и по хорошему, самому себе не надо сообщение отправлять, оно же уже есть на экране
+            # можно было бы добавить код, см ниже, но в рамках тз не будем
+            # if user == self:
+            #     continue
             user.transport.write(message.encode())
+
+    def is_login_exists(self, login):
+        for user in self.server.clients:
+            if user.login == login:
+                return True
+
+        return False
+
+    def send_history(self):
+        for message in self.server.history:
+            self.transport.write(message.encode())
+
+    def add_history(self, message):
+        self.server.history.append(message)
+        if len(self.server.history) > 10:
+            self.server.history.pop(0)
 
 
 class Server:
     clients: list
+    history: list = []
 
     def __init__(self):
         self.clients = []
