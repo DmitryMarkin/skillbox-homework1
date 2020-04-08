@@ -65,6 +65,8 @@ class ServerProtocol(asyncio.Protocol):
             # можно было бы добавить код, см ниже, но в рамках тз не будем
             # if user == self:
             #     continue
+            # и еще такой момент, когда клиент подключился но не залогинился, он тоже уже получает сообщения,
+            # мне кажется это не правильно, но исправлять не буду
             user.transport.write(message.encode())
 
     def is_login_exists(self, login):
